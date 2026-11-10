@@ -138,7 +138,7 @@ After that, `https://review.example.com/health` should return `{"ok":true,...}`.
 
 ## Use it on WordPress
 
-1. Copy `wp-plugin/rzr-client-review/` into `wp-content/plugins/` (or zip the folder and upload it via **Plugins → Add New → Upload**), then activate **Client Review**.
+1. Copy `wp-plugin/annotate-client-review/` into `wp-content/plugins/` (or zip the folder and upload it via **Plugins → Add New → Upload**), then activate **Annotate Client Review**.
 2. Open **Settings → Client Review** and fill in:
 
 | Setting | Meaning |
@@ -155,12 +155,12 @@ After that, `https://review.example.com/health` should return `{"ok":true,...}`.
 
 ### Keep the token out of the database
 
-The plugin reads the token from, in order: a `RZR_CR_TOKEN` PHP constant → a `RZR_CR_TOKEN` env var → the saved option. To avoid storing the secret in the WP database, add `wp-content/mu-plugins/rzr-cr-token.php`:
+The plugin reads the token from, in order: a `ACR_TOKEN` PHP constant → a `ACR_TOKEN` env var → the saved option. To avoid storing the secret in the WP database, add `wp-content/mu-plugins/acr-token.php`:
 
 ```php
 <?php
-if ( ! defined( 'RZR_CR_TOKEN' ) ) {
-    define( 'RZR_CR_TOKEN', getenv( 'RZR_CR_TOKEN' ) ?: 'your-admin-token-here' );
+if ( ! defined( 'ACR_TOKEN' ) ) {
+    define( 'ACR_TOKEN', getenv( 'ACR_TOKEN' ) ?: 'your-admin-token-here' );
 }
 ```
 
@@ -168,11 +168,29 @@ Leave the Settings token field blank and the plugin uses the constant.
 
 ### Raw-HTML / page-builder pages
 
-If some pages are a full `<!doctype html>` document (common with builders that output one big HTML block), the plugin also injects the toolbar through a `rzr_raw_html_output` filter, so a companion plugin that serves such documents verbatim can still show the toolbar. Normal pages use the standard `wp_footer` hook — nothing extra needed.
+If some pages are a full `<!doctype html>` document (common with builders that output one big HTML block), the plugin also injects the toolbar through a `acr_raw_html_output` filter, so a companion plugin that serves such documents verbatim can still show the toolbar. Normal pages use the standard `wp_footer` hook — nothing extra needed.
 
 ## Use it without WordPress
 
-The toolbar is just annotate.js plus a tiny bit of config. On **any** site, create the review once via the [admin API](#admin-api), then add this before `</body>`:
+The WordPress plugin is only a convenience wrapper. Under the hood there are **three parts**, and the plugin just automates parts 1 and 3. Any site can do them directly.
+
+> **Where the admin token is used:** only server-side, in steps 1 and 3 (create the review, read feedback). The **browser never sees the token** — the toolbar's requests go to the public `/v1/annotate/*` endpoints and are authorised by the page's origin matching the review's `origins`.
+
+### 1. Create the review — server-side, uses the admin token
+
+Do this once, from a terminal, a deploy script, or your own backend:
+
+```bash
+curl -X PUT https://review.example.com/admin/reviews/rvw_mysite-com \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"My site","origins":["https://mysite.com"],"open":true,"shared":true,"selfServe":true}'
+```
+
+`origins` **must** list the exact origin(s) the toolbar loads on (e.g. `https://mysite.com`), or the server rejects the browser's requests with `origin_not_allowed`.
+
+### 2. Load the toolbar on your pages — browser, no token
+
+Add this before `</body>` on any page you want reviewable:
 
 ```html
 <script
@@ -183,11 +201,9 @@ The toolbar is just annotate.js plus a tiny bit of config. On **any** site, crea
   data-page="/the/path/"
   data-start-open="true"
   defer></script>
-```
 
-For the shared board to work for pure viewers (people who never type a name), seed a stable identity so annotate always opens a session. Minimal version:
-
-```html
+<!-- Optional: let pure viewers (who never type a name) see the shared board,
+     by seeding a stable identity so annotate always opens a session. -->
 <script>
 (function(){
   var RID='rvw_mysite-com', K='annotate:invite:'+RID;
@@ -197,7 +213,20 @@ For the shared board to work for pure viewers (people who never type a name), se
 </script>
 ```
 
-Make sure the review's `origins` list includes the exact origin of the page (e.g. `https://mysite.com`), or the server will reject the requests.
+There is no token here — this is exactly what every reviewer's browser runs.
+
+### 3. Read the feedback — server-side, uses the admin token
+
+Pull every comment as JSON and do whatever you want with it (a dashboard, Slack, email, a static report):
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://review.example.com/admin/reviews/rvw_mysite-com/comments
+```
+
+The WordPress plugin's **Feedback** table is literally this call. See the full [admin API](#admin-api) for updating the review, listing reviews, and managing links.
+
+> The custom-colour `+` and the Figma-style draft outline are small front-end extras implemented in the plugin's inline bootstrap. If you want them on a non-WordPress site, lift that JS from `wp-plugin/annotate-client-review/annotate-client-review.php` (the `acr_bootstrap_js` function). Plain annotate.js works fine without them.
 
 ## Sharing a review
 
@@ -280,7 +309,7 @@ Pinning keeps your deploy reproducible; nothing updates from under you.
 
 | Symptom | Likely cause / fix |
 | --- | --- |
-| Plugin shows **401 unauthorized** under Feedback | The admin token is wrong or a placeholder. Paste the real `ADMIN_TOKEN`, or set the `RZR_CR_TOKEN` constant. Use **Check connection**. |
+| Plugin shows **401 unauthorized** under Feedback | The admin token is wrong or a placeholder. Paste the real `ADMIN_TOKEN`, or set the `ACR_TOKEN` constant. Use **Check connection**. |
 | Browser console **`origin_not_allowed` / 403** | The page's origin isn't in the review's `origins`. Add it via `PUT /admin/reviews/:id` (the WP plugin sets it from your site URL automatically). |
 | Toolbar doesn't appear | Mode is `Off`, or the URL doesn't end in `?review` (in Per-page mode), or an ad-blocker blocked the CDN script. |
 | Incognito/new device sees an empty board | Seed a session identity (the WP plugin does this; for the snippet see [Use it without WordPress](#use-it-without-wordpress)). |

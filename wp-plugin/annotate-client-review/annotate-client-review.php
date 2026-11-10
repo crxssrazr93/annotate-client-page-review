@@ -1,18 +1,18 @@
 <?php
 /**
- * Plugin Name: Client Review
+ * Plugin Name: Annotate Client Review
  * Description: Lets clients comment on pages with annotate.js. Feedback is stored on your review server. Per page mode: add ?review to a page URL. Full site mode: the review toolbar is on every page (for staging sites).
  * Version: 1.0.6
  */
 
 defined( 'ABSPATH' ) || exit;
 
-const RZR_CR_OPT        = 'rzr_client_review';
-const RZR_CR_ANNOTATE   = 'https://cdn.jsdelivr.net/npm/@reviewjs/annotate@1.6.0/annotate.js';
-const RZR_CR_TOKEN_RE   = '/^[A-Za-z0-9_-]{1,64}$/'; // a server invite (inv_...) or a self-serve code
+const ACR_OPT        = 'acr_client_review';
+const ACR_ANNOTATE   = 'https://cdn.jsdelivr.net/npm/@reviewjs/annotate@1.6.0/annotate.js';
+const ACR_TOKEN_RE   = '/^[A-Za-z0-9_-]{1,64}$/'; // a server invite (inv_...) or a self-serve code
 
-function rzr_cr_settings() {
-	return wp_parse_args( get_option( RZR_CR_OPT, array() ), array(
+function acr_settings() {
+	return wp_parse_args( get_option( ACR_OPT, array() ), array(
 		'server'  => '',
 		'token'   => '',
 		'mode'    => 'off', // off | per_page | full_site
@@ -24,30 +24,30 @@ function rzr_cr_settings() {
 	) );
 }
 
-function rzr_cr_origin() {
+function acr_origin() {
 	$p = wp_parse_url( home_url() );
 	return $p['scheme'] . '://' . $p['host'] . ( isset( $p['port'] ) ? ':' . $p['port'] : '' );
 }
 
 /** Calls the review server's admin API. Returns array data or WP_Error. */
-function rzr_cr_token() {
+function acr_token() {
 	// Prefer a server-side secret (keeps the admin token out of the WordPress database).
-	if ( defined( 'RZR_CR_TOKEN' ) && RZR_CR_TOKEN ) {
-		return RZR_CR_TOKEN;
+	if ( defined( 'ACR_TOKEN' ) && ACR_TOKEN ) {
+		return ACR_TOKEN;
 	}
-	$env = getenv( 'RZR_CR_TOKEN' );
+	$env = getenv( 'ACR_TOKEN' );
 	if ( $env ) {
 		return $env;
 	}
-	$s = rzr_cr_settings();
+	$s = acr_settings();
 	return $s['token'];
 }
 
-function rzr_cr_api( $method, $path, $body = null ) {
-	$s     = rzr_cr_settings();
-	$token = rzr_cr_token();
+function acr_api( $method, $path, $body = null ) {
+	$s     = acr_settings();
+	$token = acr_token();
 	if ( ! $s['server'] || ! $token ) {
-		return new WP_Error( 'rzr_cr_config', 'Set the server URL and admin token first.' );
+		return new WP_Error( 'acr_config', 'Set the server URL and admin token first.' );
 	}
 	$args = array(
 		'method'  => $method,
@@ -64,17 +64,17 @@ function rzr_cr_api( $method, $path, $body = null ) {
 	$code = wp_remote_retrieve_response_code( $res );
 	$data = json_decode( wp_remote_retrieve_body( $res ), true );
 	if ( $code >= 300 ) {
-		return new WP_Error( 'rzr_cr_http', 'Review server answered ' . $code . ': ' . ( $data['error'] ?? 'error' ) );
+		return new WP_Error( 'acr_http', 'Review server answered ' . $code . ': ' . ( $data['error'] ?? 'error' ) );
 	}
 	return is_array( $data ) ? $data : array();
 }
 
-function rzr_cr_sync_review() {
-	$s = rzr_cr_settings();
-	return rzr_cr_api( 'PUT', '/admin/reviews/' . rawurlencode( $s['review'] ), array(
+function acr_sync_review() {
+	$s = acr_settings();
+	return acr_api( 'PUT', '/admin/reviews/' . rawurlencode( $s['review'] ), array(
 		'name'    => get_bloginfo( 'name' ),
 		'note'    => $s['note'],
-		'origins' => array( rzr_cr_origin() ),
+		'origins' => array( acr_origin() ),
 		'open'    => (bool) $s['open'],
 		'shared'  => (bool) $s['shared'],
 		'selfServe' => (bool) $s['selfserve'],
@@ -84,21 +84,21 @@ function rzr_cr_sync_review() {
 
 /* ---------- Front end ---------- */
 
-function rzr_cr_active_request() {
+function acr_active_request() {
 	if ( is_admin() || wp_doing_ajax() || isset( $_GET['elementor-preview'] ) || is_feed() ) {
 		return false;
 	}
-	$s = rzr_cr_settings();
+	$s = acr_settings();
 	if ( ! $s['server'] || 'off' === $s['mode'] ) {
 		return false;
 	}
 	return 'full_site' === $s['mode'] || isset( $_GET['review'] );
 }
 
-function rzr_cr_snippet() {
-	$s     = rzr_cr_settings();
+function acr_snippet() {
+	$s     = acr_settings();
 	$token = isset( $_GET['review'] ) ? sanitize_text_field( wp_unslash( $_GET['review'] ) ) : '';
-	$token = preg_match( RZR_CR_TOKEN_RE, $token ) ? $token : '';
+	$token = preg_match( ACR_TOKEN_RE, $token ) ? $token : '';
 	$page  = wp_parse_url( isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '/', PHP_URL_PATH ) ?: '/';
 
 	$cfg = array(
@@ -107,18 +107,18 @@ function rzr_cr_snippet() {
 		'page'     => $page,
 		'note'     => $s['note'],
 		'token'    => $token,
-		'annotate' => RZR_CR_ANNOTATE,
+		'annotate' => ACR_ANNOTATE,
 		'picker'   => true,
 	);
 	$json = wp_json_encode( $cfg, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT );
-	return '<script>window.RZR_CR=' . $json . ';' . rzr_cr_bootstrap_js() . '</script>' . "\n";
+	return '<script>window.ACR=' . $json . ';' . acr_bootstrap_js() . '</script>' . "\n";
 }
 
 /** Front-end bootstrap: identity so viewers see the shared board, plus a custom colour picker. */
-function rzr_cr_bootstrap_js() {
+function acr_bootstrap_js() {
 	return <<<'JS'
 (function(){
- var C=window.RZR_CR||{}; if(!C.api||!C.review) return;
+ var C=window.ACR||{}; if(!C.api||!C.review) return;
  var g=function(k){try{return localStorage.getItem(k)}catch(e){return null}};
  var s=function(k,v){try{localStorage.setItem(k,v)}catch(e){}};
  var ik='annotate:invite:'+C.review, ck='an-color', dft='#f59e0b';
@@ -145,7 +145,7 @@ function rzr_cr_bootstrap_js() {
   var NS='http://www.w3.org/2000/svg', start=null, tool=null, watch=null;
   function activeTool(){ var b=document.querySelector('#__an_bar .an-btn.an-on'); return b?b.getAttribute('data-tool'):null; }
   function colr(){ try{return localStorage.getItem('an-color')||'#10b981';}catch(e){return '#10b981';} }
-  function wipe(){ var o=document.getElementById('rzr-cr-draft'); if(o&&o.parentNode)o.parentNode.removeChild(o); if(watch){clearInterval(watch);watch=null;} }
+  function wipe(){ var o=document.getElementById('acr-draft'); if(o&&o.parentNode)o.parentNode.removeChild(o); if(watch){clearInterval(watch);watch=null;} }
   document.addEventListener('pointerdown',function(e){
    if(e.button!==0 && e.pointerType==='mouse'){ start=null; return; }
    var t=activeTool();
@@ -159,7 +159,7 @@ function rzr_cr_bootstrap_js() {
    var x=Math.min(s.x,e.pageX), y=Math.min(s.y,e.pageY), w=Math.abs(e.pageX-s.x), h=Math.abs(e.pageY-s.y);
    if(w<6 && h<6) return; // annotate treats this as a click: no composer, nothing to outline
    var ov=document.getElementById('__an_overlay'); if(!ov) return;
-   var col=colr(), gEl=document.createElementNS(NS,'g'); gEl.setAttribute('id','rzr-cr-draft'); gEl.setAttribute('pointer-events','none');
+   var col=colr(), gEl=document.createElementNS(NS,'g'); gEl.setAttribute('id','acr-draft'); gEl.setAttribute('pointer-events','none');
    var shape;
    if(t==='circle'){ shape=document.createElementNS(NS,'ellipse'); shape.setAttribute('cx',x+w/2); shape.setAttribute('cy',y+h/2); shape.setAttribute('rx',w/2); shape.setAttribute('ry',h/2); }
    else { shape=document.createElementNS(NS,'rect'); shape.setAttribute('x',x); shape.setAttribute('y',y); shape.setAttribute('width',w); shape.setAttribute('height',h); shape.setAttribute('rx',6); }
@@ -177,8 +177,8 @@ function rzr_cr_bootstrap_js() {
   (function attach(){
    var pop=document.getElementById('__an_colorpop');
    if(!pop){ if(tries++<80){ setTimeout(attach,250); } return; }
-   if(document.getElementById('rzr-cr-pick')) return;
-   var plus=document.createElement('label'); plus.className='an-sw'; plus.id='rzr-cr-pick'; plus.title='Custom colour';
+   if(document.getElementById('acr-pick')) return;
+   var plus=document.createElement('label'); plus.className='an-sw'; plus.id='acr-pick'; plus.title='Custom colour';
    // Rainbow fill with a white ring and a white + (matching the presets) so it reads as "pick any colour".
    plus.style.cssText='width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:conic-gradient(from 90deg,#f43f5e,#f59e0b,#eab308,#10b981,#0ea5e9,#8b5cf6,#ec4899,#f43f5e);border:2px solid #fff;color:#fff;font:800 16px/1 system-ui,-apple-system,sans-serif;cursor:pointer;position:relative;box-sizing:border-box;text-shadow:0 0 2px rgba(0,0,0,.55),0 0 2px rgba(0,0,0,.55)';
    plus.appendChild(document.createTextNode('+'));
@@ -194,23 +194,23 @@ JS;
 }
 
 add_action( 'send_headers', function () {
-	if ( rzr_cr_active_request() && isset( $_GET['review'] ) ) {
+	if ( acr_active_request() && isset( $_GET['review'] ) ) {
 		header( 'X-Robots-Tag: noindex, nofollow' );
 	}
 } );
 
 add_action( 'wp_footer', function () {
-	if ( rzr_cr_active_request() ) {
-		echo rzr_cr_snippet(); // phpcs:ignore WordPress.Security.EscapeOutput -- built with esc_* above.
+	if ( acr_active_request() ) {
+		echo acr_snippet(); // phpcs:ignore WordPress.Security.EscapeOutput -- built with esc_* above.
 	}
 }, 99 );
 
 // Pages served by the Raw HTML Pages plugin skip wp_footer, so add the toolbar there too.
-add_filter( 'rzr_raw_html_output', function ( $html ) {
-	if ( ! rzr_cr_active_request() ) {
+add_filter( 'acr_raw_html_output', function ( $html ) {
+	if ( ! acr_active_request() ) {
 		return $html;
 	}
-	$snippet = rzr_cr_snippet();
+	$snippet = acr_snippet();
 	$pos     = strripos( $html, '</body>' );
 	return false === $pos ? $html . $snippet : substr_replace( $html, $snippet, $pos, 0 );
 } );
@@ -218,15 +218,15 @@ add_filter( 'rzr_raw_html_output', function ( $html ) {
 /* ---------- Admin ---------- */
 
 add_action( 'admin_menu', function () {
-	add_options_page( 'Client Review', 'Client Review', 'manage_options', 'rzr-client-review', 'rzr_cr_page' );
+	add_options_page( 'Annotate Client Review', 'Annotate Client Review', 'manage_options', 'annotate-client-review', 'acr_page' );
 } );
 
-add_action( 'admin_post_rzr_cr_save', function () {
+add_action( 'admin_post_acr_save', function () {
 	if ( ! current_user_can( 'manage_options' ) ) {
 		wp_die( 'Not allowed' );
 	}
-	check_admin_referer( 'rzr_cr_save' );
-	$s           = rzr_cr_settings();
+	check_admin_referer( 'acr_save' );
+	$s           = acr_settings();
 	$s['server'] = esc_url_raw( wp_unslash( $_POST['server'] ?? '' ) );
 	if ( ! empty( $_POST['token'] ) ) {
 		$s['token'] = sanitize_text_field( wp_unslash( $_POST['token'] ) );
@@ -236,46 +236,46 @@ add_action( 'admin_post_rzr_cr_save', function () {
 	$s['shared']   = empty( $_POST['shared'] ) ? 0 : 1;
 	$s['selfserve'] = empty( $_POST['selfserve'] ) ? 0 : 1;
 	$s['note'] = sanitize_textarea_field( wp_unslash( $_POST['note'] ?? '' ) );
-	update_option( RZR_CR_OPT, $s, false );
-	$r = rzr_cr_sync_review();
-	rzr_cr_redirect( is_wp_error( $r ) ? $r->get_error_message() : 'Saved and synced to the review server.' );
+	update_option( ACR_OPT, $s, false );
+	$r = acr_sync_review();
+	acr_redirect( is_wp_error( $r ) ? $r->get_error_message() : 'Saved and synced to the review server.' );
 } );
 
-add_action( 'admin_post_rzr_cr_check', function () {
+add_action( 'admin_post_acr_check', function () {
 	if ( ! current_user_can( 'manage_options' ) ) {
 		wp_die( 'Not allowed' );
 	}
-	check_admin_referer( 'rzr_cr_check' );
-	$s = rzr_cr_settings();
-	$r = rzr_cr_api( 'GET', '/admin/reviews/' . rawurlencode( $s['review'] ) );
+	check_admin_referer( 'acr_check' );
+	$s = acr_settings();
+	$r = acr_api( 'GET', '/admin/reviews/' . rawurlencode( $s['review'] ) );
 	if ( is_wp_error( $r ) ) {
-		rzr_cr_redirect( 'Connection failed. ' . $r->get_error_message() );
+		acr_redirect( 'Connection failed. ' . $r->get_error_message() );
 	}
-	rzr_cr_redirect( 'Connection OK. The server knows this review (' . esc_html( $s['review'] ) . ').' );
+	acr_redirect( 'Connection OK. The server knows this review (' . esc_html( $s['review'] ) . ').' );
 } );
 
-function rzr_cr_redirect( $msg ) {
-	wp_safe_redirect( add_query_arg( array( 'page' => 'rzr-client-review', 'rzr_msg' => rawurlencode( $msg ) ), admin_url( 'options-general.php' ) ) );
+function acr_redirect( $msg ) {
+	wp_safe_redirect( add_query_arg( array( 'page' => 'annotate-client-review', 'acr_msg' => rawurlencode( $msg ) ), admin_url( 'options-general.php' ) ) );
 	exit;
 }
 
-function rzr_cr_page() {
+function acr_page() {
 	if ( ! current_user_can( 'manage_options' ) ) {
 		return;
 	}
-	$s      = rzr_cr_settings();
-	$ready  = $s['server'] && rzr_cr_token();
-	$found  = $ready ? rzr_cr_api( 'GET', '/admin/reviews/' . rawurlencode( $s['review'] ) . '/comments' ) : null;
+	$s      = acr_settings();
+	$ready  = $s['server'] && acr_token();
+	$found  = $ready ? acr_api( 'GET', '/admin/reviews/' . rawurlencode( $s['review'] ) . '/comments' ) : null;
 	?>
 	<div class="wrap">
-		<h1>Client Review</h1>
-		<?php if ( isset( $_GET['rzr_msg'] ) ) : ?>
-			<div class="notice notice-info"><p><?php echo esc_html( wp_unslash( $_GET['rzr_msg'] ) ); ?></p></div>
+		<h1>Annotate Client Review</h1>
+		<?php if ( isset( $_GET['acr_msg'] ) ) : ?>
+			<div class="notice notice-info"><p><?php echo esc_html( wp_unslash( $_GET['acr_msg'] ) ); ?></p></div>
 		<?php endif; ?>
 
 		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-			<?php wp_nonce_field( 'rzr_cr_save' ); ?>
-			<input type="hidden" name="action" value="rzr_cr_save">
+			<?php wp_nonce_field( 'acr_save' ); ?>
+			<input type="hidden" name="action" value="acr_save">
 			<table class="form-table">
 				<tr><th>Review server URL</th><td><input class="regular-text" name="server" value="<?php echo esc_attr( $s['server'] ); ?>" placeholder="https://review.example.com"></td></tr>
 				<tr><th>Admin token</th><td><input class="regular-text" type="password" name="token" value="" placeholder="<?php echo $s['token'] ? 'Saved. Leave empty to keep it.' : ''; ?>"></td></tr>
@@ -294,8 +294,8 @@ function rzr_cr_page() {
 		</form>
 
 		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:-10px 0 20px">
-			<?php wp_nonce_field( 'rzr_cr_check' ); ?>
-			<input type="hidden" name="action" value="rzr_cr_check">
+			<?php wp_nonce_field( 'acr_check' ); ?>
+			<input type="hidden" name="action" value="acr_check">
 			<?php submit_button( 'Check connection', 'secondary', 'submit', false ); ?>
 		</form>
 
