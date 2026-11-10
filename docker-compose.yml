@@ -1,0 +1,21 @@
+# Universal way to run the review server. Reads ADMIN_TOKEN from a local .env file.
+#   cp .env.example .env   # then edit ADMIN_TOKEN
+#   docker compose up -d --build
+# Then put a TLS reverse proxy in front of localhost:8787 (see examples/).
+services:
+  review:
+    build: ./server
+    # Or use a prebuilt image instead of build:
+    # image: ghcr.io/<you>/client-review:latest
+    restart: unless-stopped
+    environment:
+      ADMIN_TOKEN: "${ADMIN_TOKEN:?set ADMIN_TOKEN in .env}"
+      PURGE_AFTER_DAYS: "${PURGE_AFTER_DAYS:-30}"
+      WRITES_PER_MINUTE: "${WRITES_PER_MINUTE:-60}"
+    volumes:
+      - review-data:/data            # reviews + comments JSON live here. Back this up.
+    ports:
+      - "127.0.0.1:8787:80"          # bind to localhost; the reverse proxy adds TLS
+
+volumes:
+  review-data:

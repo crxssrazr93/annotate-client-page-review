@@ -1,0 +1,5 @@
+# Caddy gives you automatic HTTPS. Point DNS at this host, then:
+#   caddy run --config ./Caddyfile
+review.example.com {
+    reverse_proxy 127.0.0.1:8787
+}

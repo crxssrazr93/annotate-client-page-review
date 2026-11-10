@@ -1,107 +1,161 @@
 # Client Page Review
 
-Let clients comment directly on your WordPress pages, like Figma or Google Docs comments, with a point-and-click toolbar. Feedback is stored on a small review server **you** host, not in the client's browser, so everyone sees the same board across devices.
+Let clients comment directly on your web pages, the way they do in Figma or Google Docs: a point-and-click toolbar for notes, highlights, boxes, and pins. Feedback is stored on a small server **you** host, so everyone sees the same board across devices, and nothing lives only in one person's browser.
 
-Built on the open source [annotate.js](https://github.com/reviewjs/annotate) reference backend (MIT), wrapped with a small admin API and a WordPress plugin.
+It has two pieces that work together or separately:
 
-![status](https://img.shields.io/badge/status-production-green)
+- **A review server** (Node, shipped as a Docker image) — the open-source [annotate.js](https://github.com/reviewjs/annotate) reference backend (MIT), patched at build time and wrapped with a small admin API. Runs anywhere Docker or Node runs.
+- **A WordPress plugin** — the easiest way to put the toolbar on a site and read the feedback. **Optional:** any website can load the toolbar with a few lines of HTML (see [Use it without WordPress](#use-it-without-wordpress)).
 
-## What you get
+![status](https://img.shields.io/badge/status-production-brightgreen) ![license](https://img.shields.io/badge/license-MIT-blue) ![backend](https://img.shields.io/badge/backend-Node%2022-339933) ![deploy](https://img.shields.io/badge/deploy-Docker-2496ED)
 
-- **Point-and-click review toolbar** on any page: notes, text highlights, rectangles, circles, freehand, and pins.
-- **Shared board** so the whole team and the client see every comment, reply to each other, and resolve items together.
-- **No accounts.** A reviewer just opens a link ending in `?review` and types their name. Optional per-person codes (`?review=theirname`) give a stable identity across devices.
-- **Custom colour picker** added into annotate's own colour menu (a rainbow `+` beside the presets).
-- **Figma-style draft outline:** a drawn rectangle/circle stays visible while you write the comment.
-- Works on normal pages **and** on pages served as a full raw HTML document (see the companion [raw HTML pages](#raw-html-pages) note).
+---
 
-## Architecture
+## Table of contents
+
+- [Features](#features)
+- [How it fits together](#how-it-fits-together)
+- [Quick start](#quick-start)
+- [Deploy the review server](#deploy-the-review-server)
+  - [Docker Compose](#option-a--docker-compose-recommended) · [Plain Docker](#option-b--plain-docker) · [Bare Node](#option-c--bare-node) · [CapRover / PaaS](#option-d--caprover--other-paas)
+- [Put a TLS proxy in front](#put-a-tls-proxy-in-front)
+- [Use it on WordPress](#use-it-on-wordpress)
+- [Use it without WordPress](#use-it-without-wordpress)
+- [Sharing a review](#sharing-a-review)
+- [Admin API](#admin-api)
+- [Data, backup & restore](#data-backup--restore)
+- [How the server patch works](#how-the-server-patch-works)
+- [Updating the annotate version](#updating-the-annotate-version)
+- [Security](#security)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [Credits & licence](#credits--licence)
+
+---
+
+## Features
+
+- **Full review toolbar** — notes, text highlights, rectangles, circles, freehand, and pins, anchored to the page.
+- **Shared board** — the whole team and the client see every comment, reply to each other, and resolve items together. (Can be switched to private-per-person.)
+- **No accounts, no sign-up** — a reviewer opens a link ending in `?review` and types their name. Optional per-person codes (`?review=theirname`) give a stable identity across devices.
+- **Custom colour picker** — a rainbow `+` added beside the preset swatches, so reviewers can pick any colour.
+- **Figma-style draft outline** — a drawn box/circle stays on screen while the comment is being written.
+- **Self-hosted & private** — data is plain JSON on a volume you control; nothing goes to a third party.
+- **Works anywhere** — WordPress plugin included, but the toolbar is just a script tag, so any site can use it.
+
+## How it fits together
 
 ```
-Browser (client)                WordPress site                 Review server (you host)
-┌───────────────┐   ?review     ┌──────────────────┐  admin API ┌──────────────────────┐
-│ annotate.js   │ ────────────► │ rzr-client-review │ ─────────► │ app.cjs (Node)       │
-│ toolbar + UI  │ ◄──comments── │ plugin (settings, │  Bearer    │  annotate backend +  │
-└───────────────┘   /v1/annotate│ toolbar, feedback)│   token    │  admin API, /data    │
-                                └──────────────────┘            └──────────────────────┘
+Reviewer's browser                Your website                    Review server (you host)
+┌────────────────────┐  ?review   ┌────────────────────┐  admin   ┌────────────────────────┐
+│ annotate.js toolbar │ ─────────► │ WP plugin   OR     │  API +   │ app.cjs (Node)         │
+│ draws comments,     │ ◄────────  │ a <script> snippet │  Bearer  │  annotate backend +    │
+│ sees the board      │ /v1/annotate                    │  token   │  admin API, /data vol  │
+└────────────────────┘            └────────────────────┘          └────────────────────────┘
 ```
 
-| Folder | What it is |
-| --- | --- |
-| `server/` | The annotate.js reference backend (pinned to `1.6.0`), patched at build time (`patch.cjs`) and wrapped with an admin API (`app.cjs`). Ships as a Docker image. |
-| `wp-plugin/rzr-client-review/` | A single-file WordPress plugin: a settings page, the front-end toolbar loader, and an admin feedback table. |
+- The browser talks to the review server directly over the public `/v1/annotate/*` protocol (origin-checked).
+- Your site (via the plugin or a snippet) only needs to load annotate.js and tell it the server URL + review id.
+- You talk to the server's **admin API** (bearer token) to create reviews and read all feedback. The WordPress plugin does this for you.
 
-## 1. Deploy the review server
+## Quick start
 
-The server is a tiny Node app in a Docker image. It needs one secret (`ADMIN_TOKEN`) and a persistent volume for `/data`.
+```bash
+git clone https://github.com/crxssrazr93/client-page-review.git
+cd client-page-review
+cp .env.example .env
+# edit .env: set ADMIN_TOKEN to a long random string
+#   node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
+docker compose up -d --build
+curl -s http://127.0.0.1:8787/health      # -> {"ok":true,"reviews":0}
+```
 
-**Environment**
+That's the server. Now [put TLS in front of it](#put-a-tls-proxy-in-front) and point your site at it with the [WordPress plugin](#use-it-on-wordpress) or a [plain snippet](#use-it-without-wordpress).
 
-| Var | Required | Default | Notes |
+---
+
+## Deploy the review server
+
+One secret and one volume. That's the whole contract.
+
+| Variable | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `ADMIN_TOKEN` | yes | — | 24+ char random string. Admin API bearer token. |
-| `PORT` | no | `80` | Port the server listens on. |
-| `DATA_DIR` | no | `/data` | Reviews + comments JSON. **Put this on a persistent volume.** |
-| `PURGE_AFTER_DAYS` | no | `30` | Soft-deleted comments are purged after this many days. |
-| `WRITES_PER_MINUTE` | no | `60` | Simple write rate limit per review. |
+| `ADMIN_TOKEN` | **yes** | — | 24+ char random string. Bearer token for the admin API. |
+| `PORT` | no | `80` | Port the app listens on inside the container. |
+| `DATA_DIR` | no | `/data` | Where reviews + comments JSON are written. **Persist this.** |
+| `PURGE_AFTER_DAYS` | no | `30` | Soft-deleted comments are purged after this long. |
+| `WRITES_PER_MINUTE` | no | `60` | Per-review write rate limit. |
 
-Generate a token:
-
-```bash
-node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
-```
-
-### Option A — CapRover (what this repo is set up for)
-
-`captain-definition` points at the `Dockerfile`. Create an app, add a persistent directory at `/data`, set `ADMIN_TOKEN` (and optionally the others), enable HTTPS, then deploy:
+### Option A — Docker Compose (recommended)
 
 ```bash
-npx caprover deploy -a <your-app> -t ./server-build.tar.gz   # or use the CapRover UI / git
+cp .env.example .env    # set ADMIN_TOKEN
+docker compose up -d --build
 ```
+
+`docker-compose.yml` binds the app to `127.0.0.1:8787` and stores data in a named volume. Add TLS with a reverse proxy (below).
 
 ### Option B — plain Docker
 
 ```bash
 cd server
 docker build -t client-review .
-docker run -d --name review \
-  -e ADMIN_TOKEN="<your-long-token>" \
+docker run -d --name review --restart unless-stopped \
+  -e ADMIN_TOKEN="$(node -e 'console.log(require("crypto").randomBytes(24).toString("base64url"))')" \
   -v review-data:/data \
-  -p 8787:80 \
+  -p 127.0.0.1:8787:80 \
   client-review
 ```
 
-Put it behind a reverse proxy with TLS (Caddy, nginx, Traefik). Then `GET https://review.example.com/health` should return `{"ok":true,...}`.
+### Option C — bare Node
 
-### Create a review
-
-Reviews are created/updated through the admin API, but **the WordPress plugin does this for you** when you save its settings. If you want to script it:
+No Docker required (Node 18+). The app has **zero runtime dependencies of its own**; it only needs the pinned annotate package, which the Dockerfile installs. To run without Docker, replicate those two build steps:
 
 ```bash
-curl -X PUT https://review.example.com/admin/reviews/rvw_mysite-com \
-  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-  -d '{"name":"My site","origins":["https://mysite.com"],"open":true,"shared":true,"selfServe":true}'
+cd server
+npm init -y >/dev/null
+npm install --omit=dev @reviewjs/annotate@1.6.0
+cp node_modules/@reviewjs/annotate/examples/annotate-server.cjs ./annotate-server.cjs
+node patch.cjs annotate-server.cjs           # applies the shared-board + self-serve patches
+ADMIN_TOKEN=yourlongtoken DATA_DIR=./data PORT=8787 node app.cjs
 ```
 
-## 2. Install the WordPress plugin
+### Option D — CapRover / other PaaS
 
-Copy `wp-plugin/rzr-client-review/` into `wp-content/plugins/` (or zip the folder and upload it), then activate **Client Review**. Go to **Settings → Client Review** and set:
+`captain-definition` in the repo points at the `Dockerfile`, so CapRover (and most Dockerfile-based PaaS) can deploy it directly. Create the app, add a persistent directory at `/data`, set `ADMIN_TOKEN`, enable HTTPS, and deploy. The same `Dockerfile` works on Fly.io, Render, Railway, Google Cloud Run, etc.
+
+## Put a TLS proxy in front
+
+The server speaks plain HTTP and expects to sit behind a proxy that terminates TLS. Pick one:
+
+- **Caddy** (automatic HTTPS, simplest) — see [`examples/Caddyfile`](examples/Caddyfile).
+- **nginx** (with certbot) — see [`examples/nginx.conf`](examples/nginx.conf).
+- **Traefik**, a cloud load balancer, or your PaaS's built-in HTTPS all work too.
+
+After that, `https://review.example.com/health` should return `{"ok":true,...}`.
+
+---
+
+## Use it on WordPress
+
+1. Copy `wp-plugin/rzr-client-review/` into `wp-content/plugins/` (or zip the folder and upload it via **Plugins → Add New → Upload**), then activate **Client Review**.
+2. Open **Settings → Client Review** and fill in:
 
 | Setting | Meaning |
 | --- | --- |
 | **Review server URL** | e.g. `https://review.example.com` |
-| **Admin token** | Your `ADMIN_TOKEN`. Prefer the constant/env method below to keep it out of the DB. |
+| **Admin token** | Your `ADMIN_TOKEN`. Prefer the [constant/env method](#keep-the-token-out-of-the-database) to keep it out of the DB. |
 | **Mode** | `Off`, `Per page` (toolbar only when the URL ends with `?review`), or `Full site` (every page — staging only). |
-| **Name only access** | Anyone with the link comments after typing their name. No codes to hand out. |
+| **Name only access** | Anyone with the link comments after typing a name. No codes to hand out. |
 | **Shared board** | Everyone sees everyone's comments (recommended). Off = each person sees only their own. |
 | **Self-serve codes** | Allow `?review=CODE` so a person keeps the same identity across devices. |
 | **Note to reviewers** | Short instruction shown in the toolbar. |
 
-Press **Check connection** to confirm the server URL + token work. The **Feedback** table on the same page lists everything clients have posted.
+3. Press **Check connection** to confirm the URL + token work. Saving the settings also creates/updates the review on the server automatically. The **Feedback** table on the same page lists everything clients post.
 
-### Keep the admin token out of the database (recommended)
+### Keep the token out of the database
 
-The plugin reads the token from, in order: a `RZR_CR_TOKEN` PHP constant, a `RZR_CR_TOKEN` environment variable, then the saved option. To avoid storing the secret in the WP database, drop a must-use plugin at `wp-content/mu-plugins/rzr-cr-token.php`:
+The plugin reads the token from, in order: a `RZR_CR_TOKEN` PHP constant → a `RZR_CR_TOKEN` env var → the saved option. To avoid storing the secret in the WP database, add `wp-content/mu-plugins/rzr-cr-token.php`:
 
 ```php
 <?php
@@ -110,53 +164,144 @@ if ( ! defined( 'RZR_CR_TOKEN' ) ) {
 }
 ```
 
-Leave the Settings token field blank and the plugin will use the constant.
+Leave the Settings token field blank and the plugin uses the constant.
 
-## 3. Share a review
+### Raw-HTML / page-builder pages
 
-- **Simplest:** send the page URL with `?review` on the end, e.g. `https://mysite.com/landing/?review`. The reviewer types their name and starts commenting.
-- **Stable identity:** `https://mysite.com/landing/?review=alex` — the code `alex` becomes a saved identity, same across devices.
-- **Full-site mode** on staging: every page shows the toolbar, no `?review` needed.
+If some pages are a full `<!doctype html>` document (common with builders that output one big HTML block), the plugin also injects the toolbar through a `rzr_raw_html_output` filter, so a companion plugin that serves such documents verbatim can still show the toolbar. Normal pages use the standard `wp_footer` hook — nothing extra needed.
 
-Pages opened with `?review` are served with `X-Robots-Tag: noindex` so review links are never indexed.
+## Use it without WordPress
 
-## Server admin API
+The toolbar is just annotate.js plus a tiny bit of config. On **any** site, create the review once via the [admin API](#admin-api), then add this before `</body>`:
 
-All admin routes need `Authorization: Bearer <ADMIN_TOKEN>`.
+```html
+<script
+  src="https://cdn.jsdelivr.net/npm/@reviewjs/annotate@1.6.0/annotate.js"
+  data-api="https://review.example.com"
+  data-review-id="rvw_mysite-com"
+  data-project="rvw_mysite-com"
+  data-page="/the/path/"
+  data-start-open="true"
+  defer></script>
+```
 
-| Method and path | Does |
+For the shared board to work for pure viewers (people who never type a name), seed a stable identity so annotate always opens a session. Minimal version:
+
+```html
+<script>
+(function(){
+  var RID='rvw_mysite-com', K='annotate:invite:'+RID;
+  try{ if(!localStorage.getItem(K) && !localStorage.getItem('an-author'))
+    localStorage.setItem(K,'g-'+Math.random().toString(36).slice(2,12)); }catch(e){}
+})();
+</script>
+```
+
+Make sure the review's `origins` list includes the exact origin of the page (e.g. `https://mysite.com`), or the server will reject the requests.
+
+## Sharing a review
+
+- **Simplest:** send the page URL with `?review` on the end — `https://mysite.com/landing/?review`. The reviewer types their name and comments.
+- **Stable identity:** `https://mysite.com/landing/?review=alex` — the code `alex` becomes a saved identity, the same on any device.
+- **Full-site mode** (WordPress, staging only): every page shows the toolbar with no `?review` needed.
+
+Pages opened with `?review` are served `X-Robots-Tag: noindex` so review links are never indexed.
+
+## Admin API
+
+Base URL is your server. All admin routes require `Authorization: Bearer <ADMIN_TOKEN>`.
+
+| Method & path | Does |
 | --- | --- |
-| `GET /admin/reviews` | List reviews |
-| `GET /admin/reviews/:id` | One review |
-| `PUT /admin/reviews/:id` | Create/update (`name`, `note`, `origins`, `pages`, `open`, `closed`, `shared`, `selfServe`) |
-| `POST /admin/reviews/:id/invites` | Create a named/author link (`name`, `author`) |
+| `GET /admin/reviews` | List all reviews |
+| `GET /admin/reviews/:id` | One review (with its invites) |
+| `PUT /admin/reviews/:id` | Create/update: `name`, `note`, `origins[]`, `pages[]`, `open`, `closed`, `shared`, `selfServe` |
+| `POST /admin/reviews/:id/invites` | Create a named/author link: `{ "name": "...", "author": true }` |
 | `DELETE /admin/reviews/:id/invites/:token` | Revoke a link |
-| `GET /admin/reviews/:id/comments` | All comments of a review |
+| `GET /admin/reviews/:id/comments` | Every comment in a review |
+| `GET /health` | Liveness, **no token** |
+| `* /v1/annotate/*` | The annotate.js wire protocol (origin-checked, used by the browser) |
 
-`GET /health` needs no token. Everything under `/v1/annotate/*` is the annotate.js wire protocol (origin-checked against the review's `origins`).
+Create a review from the command line:
+
+```bash
+curl -X PUT https://review.example.com/admin/reviews/rvw_mysite-com \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{
+        "name": "My site",
+        "origins": ["https://mysite.com"],
+        "open": true, "shared": true, "selfServe": true
+      }'
+```
+
+Review ids are your choice; a safe convention is `rvw_` + the host with non-alphanumerics replaced by `-` (e.g. `rvw_mysite-com`). The WordPress plugin uses exactly that.
+
+## Data, backup & restore
+
+Everything lives under `DATA_DIR` (`/data`) as plain JSON:
+
+```
+/data/reviews.json                 # all reviews + their invites
+/data/comments/<review-id>.json    # comments per review
+```
+
+- **Back up:** copy the `/data` volume (or `docker run --rm -v review-data:/data -v "$PWD":/out alpine tar czf /out/review-backup.tgz -C /data .`).
+- **Restore:** stop the container, put the JSON back, start it.
+- **Export one review's comments** any time via `GET /admin/reviews/:id/comments`. Reviewers can also export/import their own copy from the toolbar.
+
+Because it's just files, there is no database to run and migrations are trivial.
 
 ## How the server patch works
 
-`patch.cjs` applies a handful of **asserted** string replacements to the pinned annotate reference server at Docker build time, so there is no fork to maintain:
+`patch.cjs` applies a few **asserted** string replacements to the pinned annotate reference server at Docker build time, so there is no fork to maintain:
 
-1. Read reviews from an external map so they can change without a restart.
-2. Add a per-review **`shared`** board: when `shared` is true every reviewer can view, reply to, resolve, edit and delete any comment. In a non-shared review the original owner-only checks apply.
-3. Add **self-serve codes**: an unknown `?review=CODE` on a `selfServe` review becomes a stable identity derived from `sha256(reviewId + ':' + code)`.
+1. **External reviews map** — reviews are read from a shared map, so they can change without restarting the server.
+2. **Shared board** — when a review's `shared` is true, every reviewer can view, reply to, resolve, edit, and delete any comment or reply. In a non-shared review the original owner-only rules apply.
+3. **Self-serve codes** — on a `selfServe` review, an unknown `?review=CODE` becomes a stable identity derived from `sha256(reviewId + ':' + code)`, so the same code is the same person on any device.
 
-If annotate changes its internals in a future version, the assertions in `patch.cjs` fail the build loudly instead of shipping something broken. Bump the pinned version in the `Dockerfile` and adjust the patch targets.
+Each replacement asserts its target exists and is unique, and a final check counts the guards it rewrote. If a future annotate version changes those internals, **the build fails loudly** instead of shipping something subtly broken.
 
-## Raw HTML pages
+## Updating the annotate version
 
-If some of your pages are a full `<!doctype html>` document pasted into a single HTML block (common with page builders), the plugin also injects the toolbar through a `rzr_raw_html_output` filter, so a companion "raw HTML pages" plugin that serves those documents verbatim can expose the review toolbar too. Normal pages use the standard `wp_footer` hook.
+1. Bump the pinned version in `server/Dockerfile` (the `@reviewjs/annotate@x.y.z` line).
+2. Rebuild. If annotate moved the code the patch targets, `patch.cjs` throws during the build and names the target that no longer matches — update that string and rebuild.
 
-## Security notes
+Pinning keeps your deploy reproducible; nothing updates from under you.
 
-- The admin token is the only secret. Keep it out of the WP database with the constant/env method above, and never commit it.
-- `origins` on each review is an allow-list: the public annotate endpoints reject requests from any other origin.
-- Review links carry `noindex`.
-- This is built for client feedback on your own staging/production pages. It is not a general-purpose public commenting system.
+## Security
+
+- The **admin token** is the only secret. Keep it out of app source and the WP database (use the constant/env method), rotate it by changing `ADMIN_TOKEN` and the plugin's token together.
+- Each review's **`origins`** is an allow-list; the public annotate endpoints reject any other origin.
+- Review links carry **`noindex`**.
+- Bind the container to `127.0.0.1` and expose it only through your TLS proxy.
+- This is for client feedback on **your own** pages. It is not a hardened public commenting system for untrusted internet traffic.
+
+## Troubleshooting
+
+| Symptom | Likely cause / fix |
+| --- | --- |
+| Plugin shows **401 unauthorized** under Feedback | The admin token is wrong or a placeholder. Paste the real `ADMIN_TOKEN`, or set the `RZR_CR_TOKEN` constant. Use **Check connection**. |
+| Browser console **`origin_not_allowed` / 403** | The page's origin isn't in the review's `origins`. Add it via `PUT /admin/reviews/:id` (the WP plugin sets it from your site URL automatically). |
+| Toolbar doesn't appear | Mode is `Off`, or the URL doesn't end in `?review` (in Per-page mode), or an ad-blocker blocked the CDN script. |
+| Incognito/new device sees an empty board | Seed a session identity (the WP plugin does this; for the snippet see [Use it without WordPress](#use-it-without-wordpress)). |
+| Comments vanished after redeploy | `/data` wasn't on a persistent volume. Always mount it. |
+| `Set ADMIN_TOKEN (24+ characters).` on boot | The token is missing or too short. |
+
+## FAQ
+
+**Does it need a database?** No. Data is JSON files on a volume.
+
+**Can multiple sites share one server?** Yes — one server hosts many reviews (one per site/review id), each with its own `origins`.
+
+**Is client data sent anywhere else?** No. The browser talks only to your server and loads annotate.js from a CDN (you can self-host that file too).
+
+**Can I use it on a static site / React / plain HTML?** Yes — see [Use it without WordPress](#use-it-without-wordpress).
+
+**Can reviewers edit each other's comments?** On a `shared` review, yes (that's the point). Turn `shared` off for private-per-person feedback.
 
 ## Credits & licence
 
-- [annotate.js](https://github.com/reviewjs/annotate) by the reviewjs project (MIT) — the review backend and front-end toolbar.
-- This wrapper (server admin API, patch, WordPress plugin) is released under the MIT licence. See `LICENSE`.
+- [annotate.js](https://github.com/reviewjs/annotate) by the reviewjs project (MIT) — the review backend and front-end toolbar this builds on.
+- The server admin API, the build-time patch, and the WordPress plugin in this repo are released under the **MIT licence** (see [`LICENSE`](LICENSE)).
+
+PRs and issues welcome.
