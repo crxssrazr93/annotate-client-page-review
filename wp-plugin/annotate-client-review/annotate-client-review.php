@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Annotate Client Review
  * Description: Lets clients comment on pages with annotate.js. Feedback is stored on your review server. Per page mode: add ?review to a page URL. Full site mode: the review toolbar is on every page (for staging sites).
- * Version: 1.0.6
+ * Version: 1.1.0
  */
 
 defined( 'ABSPATH' ) || exit;
@@ -170,24 +170,67 @@ function acr_bootstrap_js() {
    watch=setInterval(function(){ var c=document.getElementById('__an_compose'); if(!c || !c.classList.contains('an-show')) wipe(); },200);
   },true);
  }
- // Custom colour: add a "+" swatch inside annotate's own colour menu (#__an_colorpop),
- // after its five presets. Annotate builds the menu asynchronously, so poll, then inject once.
+ // Custom colour: a "+" swatch inside annotate's own colour menu (#__an_colorpop) that opens a
+ // small in-page picker anchored to the toolbar. We avoid the native <input type=color> because
+ // on some platforms (e.g. Linux/GTK) it opens in a screen corner, far from the toolbar.
  function picker(){
   var tries=0;
   (function attach(){
    var pop=document.getElementById('__an_colorpop');
    if(!pop){ if(tries++<80){ setTimeout(attach,250); } return; }
    if(document.getElementById('acr-pick')) return;
-   var plus=document.createElement('label'); plus.className='an-sw'; plus.id='acr-pick'; plus.title='Custom colour';
+   var plus=document.createElement('button'); plus.type='button'; plus.className='an-sw'; plus.id='acr-pick'; plus.title='Custom colour';
    // Rainbow fill with a white ring and a white + (matching the presets) so it reads as "pick any colour".
-   plus.style.cssText='width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:conic-gradient(from 90deg,#f43f5e,#f59e0b,#eab308,#10b981,#0ea5e9,#8b5cf6,#ec4899,#f43f5e);border:2px solid #fff;color:#fff;font:800 16px/1 system-ui,-apple-system,sans-serif;cursor:pointer;position:relative;box-sizing:border-box;text-shadow:0 0 2px rgba(0,0,0,.55),0 0 2px rgba(0,0,0,.55)';
+   plus.style.cssText='width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:conic-gradient(from 90deg,#f43f5e,#f59e0b,#eab308,#10b981,#0ea5e9,#8b5cf6,#ec4899,#f43f5e);border:2px solid #fff;color:#fff;font:800 16px/1 system-ui,-apple-system,sans-serif;cursor:pointer;position:relative;box-sizing:border-box;padding:0;text-shadow:0 0 2px rgba(0,0,0,.55),0 0 2px rgba(0,0,0,.55)';
    plus.appendChild(document.createTextNode('+'));
-   var i=document.createElement('input'); i.type='color'; i.value=g(ck)||dft;
-   i.style.cssText='position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer';
-   plus.appendChild(i);
-   i.addEventListener('change',function(){ s(ck,i.value); location.reload(); });
+   plus.addEventListener('click',function(e){ e.preventDefault(); e.stopPropagation(); openPicker(); });
    pop.appendChild(plus);
   })();
+ }
+ function clampf(x){ return Math.max(0,Math.min(1,x)); }
+ function hsv2rgb(h,sa,va){ var c=va*sa, x=c*(1-Math.abs((h/60)%2-1)), m=va-c, r=0,gg=0,b=0;
+  if(h<60){r=c;gg=x;} else if(h<120){r=x;gg=c;} else if(h<180){gg=c;b=x;} else if(h<240){gg=x;b=c;} else if(h<300){r=x;b=c;} else {r=c;b=x;}
+  return [Math.round((r+m)*255),Math.round((gg+m)*255),Math.round((b+m)*255)]; }
+ function hsv2hex(h,sa,va){ return '#'+hsv2rgb(h,sa,va).map(function(n){ return ('0'+n.toString(16)).slice(-2); }).join(''); }
+ function hex2hsv(hex){ var m=/^#?([0-9a-f]{6})$/i.exec(String(hex||'').trim()); if(!m) return null;
+  var n=parseInt(m[1],16), r=(n>>16&255)/255, gg=(n>>8&255)/255, b=(n&255)/255;
+  var mx=Math.max(r,gg,b), mn=Math.min(r,gg,b), d=mx-mn, h=0;
+  if(d){ if(mx===r)h=((gg-b)/d)%6; else if(mx===gg)h=(b-r)/d+2; else h=(r-gg)/d+4; h*=60; if(h<0)h+=360; }
+  return [h, mx?d/mx:0, mx]; }
+ function bindDrag(el,fn){ el.addEventListener('pointerdown',function(e){ e.preventDefault(); if(el.setPointerCapture){try{el.setPointerCapture(e.pointerId);}catch(x){}} fn(e);
+  function mv(ev){ fn(ev); } function up(){ el.removeEventListener('pointermove',mv); el.removeEventListener('pointerup',up); }
+  el.addEventListener('pointermove',mv); el.addEventListener('pointerup',up); }); }
+ function closePicker(){ var p=document.getElementById('acr-cpick'); if(p){ if(p._out) document.removeEventListener('pointerdown',p._out,true); p.remove(); } }
+ function openPicker(){
+  closePicker();
+  var hsv=hex2hsv(g(ck)||dft)||[160,.6,.7], ch=hsv[0], cs=hsv[1], cv=hsv[2], SVW=172, SVH=120;
+  var P=document.createElement('div'); P.id='acr-cpick';
+  P.style.cssText='position:fixed;z-index:2147483647;width:196px;background:#1c1c24;border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:12px;box-shadow:0 12px 34px rgba(0,0,0,.45);font:500 12px system-ui,-apple-system,sans-serif;color:#fff;touch-action:none';
+  var svArea=document.createElement('div'); svArea.style.cssText='position:relative;width:'+SVW+'px;height:'+SVH+'px;border-radius:8px;overflow:hidden;cursor:crosshair';
+  var svDot=document.createElement('div'); svDot.style.cssText='position:absolute;width:12px;height:12px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.45);transform:translate(-50%,-50%);pointer-events:none'; svArea.appendChild(svDot);
+  var hueBar=document.createElement('div'); hueBar.style.cssText='position:relative;height:12px;margin-top:10px;border-radius:6px;cursor:pointer;background:linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)';
+  var hueDot=document.createElement('div'); hueDot.style.cssText='position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:#fff;border:1px solid rgba(0,0,0,.35);transform:translate(-50%,-50%);pointer-events:none'; hueBar.appendChild(hueDot);
+  var foot=document.createElement('div'); foot.style.cssText='display:flex;align-items:center;gap:8px;margin-top:10px';
+  var prev=document.createElement('div'); prev.style.cssText='width:26px;height:26px;border-radius:6px;border:1px solid rgba(255,255,255,.25);flex:none';
+  var hx=document.createElement('input'); hx.type='text'; hx.spellcheck=false; hx.maxLength=7; hx.style.cssText='flex:1;min-width:0;background:#2a2a34;border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#fff;padding:5px 7px;font:inherit';
+  var ok=document.createElement('button'); ok.type='button'; ok.textContent='Apply'; ok.style.cssText='background:#fff;color:#111;border:0;border-radius:6px;padding:6px 11px;font:700 12px system-ui,sans-serif;cursor:pointer';
+  foot.appendChild(prev); foot.appendChild(hx); foot.appendChild(ok);
+  P.appendChild(svArea); P.appendChild(hueBar); P.appendChild(foot);
+  document.body.appendChild(P);
+  var bar=document.getElementById('__an_bar'), br=bar?bar.getBoundingClientRect():null, pw=P.offsetWidth||220, ph=P.offsetHeight||200;
+  P.style.left=(br?Math.max(8, br.left-pw-10):Math.max(8, window.innerWidth-pw-70))+'px';
+  P.style.top=(br?Math.min(window.innerHeight-ph-8, Math.max(8, br.top+br.height/2-ph/2)):80)+'px';
+  function render(kbd){ svArea.style.background='linear-gradient(to top,#000,rgba(0,0,0,0)),linear-gradient(to right,#fff,hsl('+ch+',100%,50%))';
+   svDot.style.left=(cs*SVW)+'px'; svDot.style.top=((1-cv)*SVH)+'px'; hueDot.style.left=((ch/360)*SVW)+'px';
+   var hex=hsv2hex(ch,cs,cv); prev.style.background=hex; if(!kbd) hx.value=hex; }
+  render();
+  bindDrag(svArea,function(e){ var r=svArea.getBoundingClientRect(); cs=clampf((e.clientX-r.left)/r.width); cv=clampf(1-(e.clientY-r.top)/r.height); render(); });
+  bindDrag(hueBar,function(e){ var r=hueBar.getBoundingClientRect(); ch=clampf((e.clientX-r.left)/r.width)*360; render(); });
+  hx.addEventListener('input',function(){ var hv=hex2hsv(hx.value); if(hv){ ch=hv[0]; cs=hv[1]; cv=hv[2]; render(true); } });
+  function apply(){ s(ck, hsv2hex(ch,cs,cv)); location.reload(); }
+  ok.addEventListener('click',apply);
+  hx.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); apply(); } });
+  setTimeout(function(){ P._out=function(e){ if(!P.contains(e.target)){ closePicker(); } }; document.addEventListener('pointerdown',P._out,true); },0);
  }
 })();
 JS;
