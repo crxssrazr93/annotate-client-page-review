@@ -61,8 +61,8 @@ Reviewer's browser                Your website                    Review server 
 ## Quick start
 
 ```bash
-git clone https://github.com/crxssrazr93/client-page-review.git
-cd client-page-review
+git clone https://github.com/crxssrazr93/annotate-client-page-review.git
+cd annotate-client-page-review
 cp .env.example .env
 # edit .env: set ADMIN_TOKEN to a long random string
 #   node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
