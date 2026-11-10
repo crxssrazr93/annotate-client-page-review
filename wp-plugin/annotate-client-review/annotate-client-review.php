@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Annotate Client Review
  * Description: Lets clients comment on pages with annotate.js. Feedback is stored on your review server. Per page mode: add ?review to a page URL. Full site mode: the review toolbar is on every page (for staging sites).
- * Version: 1.1.0
+ * Version: 1.1.1
  */
 
 defined( 'ABSPATH' ) || exit;
@@ -205,15 +205,15 @@ function acr_bootstrap_js() {
   closePicker();
   var hsv=hex2hsv(g(ck)||dft)||[160,.6,.7], ch=hsv[0], cs=hsv[1], cv=hsv[2], SVW=172, SVH=120;
   var P=document.createElement('div'); P.id='acr-cpick';
-  P.style.cssText='position:fixed;z-index:2147483647;width:196px;background:#1c1c24;border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:12px;box-shadow:0 12px 34px rgba(0,0,0,.45);font:500 12px system-ui,-apple-system,sans-serif;color:#fff;touch-action:none';
+  P.style.cssText='position:fixed;z-index:2147483647;width:196px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:12px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.18);font:500 12px system-ui,-apple-system,sans-serif;color:#333;touch-action:none';
   var svArea=document.createElement('div'); svArea.style.cssText='position:relative;width:'+SVW+'px;height:'+SVH+'px;border-radius:8px;overflow:hidden;cursor:crosshair';
   var svDot=document.createElement('div'); svDot.style.cssText='position:absolute;width:12px;height:12px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.45);transform:translate(-50%,-50%);pointer-events:none'; svArea.appendChild(svDot);
   var hueBar=document.createElement('div'); hueBar.style.cssText='position:relative;height:12px;margin-top:10px;border-radius:6px;cursor:pointer;background:linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)';
   var hueDot=document.createElement('div'); hueDot.style.cssText='position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:#fff;border:1px solid rgba(0,0,0,.35);transform:translate(-50%,-50%);pointer-events:none'; hueBar.appendChild(hueDot);
   var foot=document.createElement('div'); foot.style.cssText='display:flex;align-items:center;gap:8px;margin-top:10px';
-  var prev=document.createElement('div'); prev.style.cssText='width:26px;height:26px;border-radius:6px;border:1px solid rgba(255,255,255,.25);flex:none';
-  var hx=document.createElement('input'); hx.type='text'; hx.spellcheck=false; hx.maxLength=7; hx.style.cssText='flex:1;min-width:0;background:#2a2a34;border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#fff;padding:5px 7px;font:inherit';
-  var ok=document.createElement('button'); ok.type='button'; ok.textContent='Apply'; ok.style.cssText='background:#fff;color:#111;border:0;border-radius:6px;padding:6px 11px;font:700 12px system-ui,sans-serif;cursor:pointer';
+  var prev=document.createElement('div'); prev.style.cssText='width:26px;height:26px;border-radius:6px;border:1px solid rgba(0,0,0,.18);flex:none';
+  var hx=document.createElement('input'); hx.type='text'; hx.spellcheck=false; hx.maxLength=7; hx.style.cssText='flex:1;min-width:0;background:#f6f6f7;border:1px solid rgba(0,0,0,.14);border-radius:6px;color:#222;padding:5px 7px;font:inherit';
+  var ok=document.createElement('button'); ok.type='button'; ok.textContent='Apply'; ok.style.cssText='background:#17171f;color:#fff;border:0;border-radius:6px;padding:6px 11px;font:700 12px system-ui,sans-serif;cursor:pointer';
   foot.appendChild(prev); foot.appendChild(hx); foot.appendChild(ok);
   P.appendChild(svArea); P.appendChild(hueBar); P.appendChild(foot);
   document.body.appendChild(P);
